@@ -2,8 +2,8 @@ package ui
 
 import (
 	"fmt"
-	"strconv"
 	"io"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -31,6 +31,7 @@ func (s *Spinner) Start(out io.Writer, prefix string) {
 	go func() {
 		defer s.wg.Done()
 		defer s.t.Stop()
+		defer s.w.Flush(out)
 
 		var progress string
 		var ok bool

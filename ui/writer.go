@@ -25,10 +25,10 @@ type Writer struct {
 
 // Flush TODO(peter): document
 func (w *Writer) Flush(out io.Writer) error {
+	w.clearLines(out)
 	if len(w.buf.Bytes()) == 0 {
 		return nil
 	}
-	w.clearLines(out)
 
 	for _, b := range w.buf.Bytes() {
 		if b == '\n' {

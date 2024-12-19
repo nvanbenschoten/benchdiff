@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -214,6 +215,8 @@ func run(ctx context.Context) error {
 	defer oldSuite.close()
 	defer newSuite.close()
 
+	printHeader(os.Stdout, oldSuite, newSuite)
+
 	if previousRun == "" {
 		if err := buildBenches(ctx, pkgFilter, postChck, &oldSuite, &newSuite); err != nil {
 			return err
@@ -334,9 +337,8 @@ func runCmpBenches(
 	cpuProfile, memProfile, mutexProfile bool,
 	itersPerTest int,
 ) error {
-	fmt.Fprintf(os.Stderr, "\nrunning benchmarks:")
 	var spinner ui.Spinner
-	spinner.Start(os.Stderr, "")
+	spinner.Start(os.Stderr, "running benchmarks:")
 	defer spinner.Stop()
 	for i, t := range tests {
 		pkg := testBinToPkg(t)
@@ -356,7 +358,6 @@ func runCmpBenches(
 				return err
 			}
 		}
-		fmt.Fprintln(os.Stderr)
 	}
 	return nil
 }
@@ -541,7 +542,6 @@ func (bs *benchSuite) build(pkgFilter []string, postChck string, t time.Time) (e
 	// Create the binary directory: ./benchdiff/<ref>/bin/<hash(pkgFilter)>
 	bs.binDir = testBinDir(bs.ref, pkgFilter)
 	if _, err = os.Stat(bs.binDir); err == nil {
-		fmt.Fprintf(os.Stderr, "test binaries already exist for %s: %.50s\n", bs.ref, bs.subject)
 		files, err := ioutil.ReadDir(bs.binDir)
 		if err != nil {
 			return err
@@ -567,7 +567,6 @@ func (bs *benchSuite) build(pkgFilter []string, postChck string, t time.Time) (e
 		}
 	}()
 
-	fmt.Fprintf(os.Stderr, "checking out '%s'\n", bs.ref)
 	if err := checkoutRef(bs.ref, postChck); err != nil {
 		return err
 	}
@@ -589,8 +588,8 @@ func (bs *benchSuite) build(pkgFilter []string, postChck string, t time.Time) (e
 		} else if ok {
 			bs.testFiles[testBin] = struct{}{}
 		}
+		spinner.Update(ui.Fraction(i+1, len(pkgs)))
 	}
-	spinner.Update(ui.Fraction(len(pkgs), len(pkgs)))
 	return nil
 }
 
@@ -631,4 +630,17 @@ func (fs fileSet) sorted() []string {
 	}
 	sort.Strings(s)
 	return s
+}
+
+func printHeader(w io.Writer, oldSuite, newSuite benchSuite) {
+	fmt.Fprintf(w, "old:  %s %.50s\n", oldSuite.ref, oldSuite.subject)
+	fmt.Fprintf(w, "new:  %s %.50s\n", newSuite.ref, newSuite.subject)
+	fmt.Fprintf(w, "args: %s\n\n", strings.Join(func() []string {
+		quoted := make([]string, 1+len(os.Args[1:]))
+		quoted[0] = "benchdiff"
+		for i, arg := range os.Args[1:] {
+			quoted[1+i] = strconv.Quote(arg)
+		}
+		return quoted
+	}(), " "))
 }
