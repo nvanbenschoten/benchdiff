@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"math"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/pprof/profile"
 	"github.com/nvanbenschoten/benchdiff/google"
 	"github.com/nvanbenschoten/benchdiff/ui"
 	"github.com/pkg/errors"
@@ -365,12 +367,94 @@ func runCmpBenches(
 			// Interleave test suite runs instead of using -count=itersPerTest. The
 			// idea is that this reduces the chance that we pick up external noise
 			// with a time correlation.
-			if err := runSingleBench(bs1, t, runPattern, benchTime, cpuProfile, memProfile, mutexProfile); err != nil {
+			for _, b := range []*benchSuite{bs1, bs2} {
+				if j == 0 {
+					if err := b.unlinkProfiles(); err != nil {
+						return err
+					}
+				}
+				if err := runSingleBench(b, t, runPattern, benchTime, cpuProfile, memProfile, mutexProfile); err != nil {
+					return err
+				}
+
+				if err := b.mergeProfiles(cpuProfile, memProfile, mutexProfile); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (bs *benchSuite) unlinkProfiles() error {
+	return filepath.WalkDir(bs.artDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".prof") {
+			return nil
+		}
+		if err := os.Remove(d.Name()); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	})
+}
+
+func (bs *benchSuite) mergeProfiles(cpuProfile, memProfile, mutexProfile bool) error {
+	type tup struct {
+		from, into string
+	}
+	var tups []tup
+	if cpuProfile {
+		tups = append(tups, tup{"cpu_last", "cpu"})
+	}
+	if memProfile {
+		tups = append(tups, tup{"mem_last", "mem"})
+	}
+	if mutexProfile {
+		tups = append(tups, tup{"mutex_last", "mutex"})
+	}
+	for _, cur := range tups {
+		dest := bs.getProfileFile(cur.into)
+		var srcs []*profile.Profile
+		if _, err := os.Stat(dest); err == nil {
+			mergedBytes, err := os.ReadFile(dest)
+			if err != nil {
 				return err
 			}
-			if err := runSingleBench(bs2, t, runPattern, benchTime, cpuProfile, memProfile, mutexProfile); err != nil {
+			p, err := profile.Parse(bytes.NewReader(mergedBytes))
+			if err != nil {
 				return err
 			}
+			srcs = append(srcs, p)
+		}
+		{
+			newBytes, err := os.ReadFile(bs.getProfileFile(cur.from))
+			if err != nil {
+				return err
+			}
+			p, err := profile.Parse(bytes.NewReader(newBytes))
+			if err != nil {
+				return err
+			}
+			srcs = append(srcs, p)
+		}
+
+		merged, err := profile.Merge(srcs)
+		if err != nil {
+			return err
+		}
+		f, err := os.Create(dest)
+		if err != nil {
+			return err
+		}
+		if err := merged.Write(f); err != nil {
+			_ = f.Close()
+			return err
+		}
+		if err := f.Close(); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -394,14 +478,14 @@ func runSingleBench(
 		args = append(args, "-test.benchtime", benchTime)
 	}
 	if cpuProfile {
-		args = append(args, "-test.cpuprofile", bs.getCpuProfileFile())
+		args = append(args, "-test.cpuprofile", bs.getProfileFile("cpu_last"))
 	}
 	if memProfile {
 		// TODO(nvanbenschoten): consider passing -test.memprofilerate=1.
-		args = append(args, "-test.memprofile", bs.getMemProfileFile())
+		args = append(args, "-test.memprofile", bs.getProfileFile("mem_last"))
 	}
 	if mutexProfile {
-		args = append(args, "-test.mutexprofile", bs.getMutexProfileFile())
+		args = append(args, "-test.mutexprofile", bs.getProfileFile("mutex_last"))
 	}
 	if hasLogToStderr {
 		args = append(args, "--logtostderr", "NONE")
@@ -484,7 +568,7 @@ func logProfileLocations(
 	bs1, bs2 *benchSuite, cpuProfile, memProfile, mutexProfile bool,
 ) {
 	log := func(profType string) {
-		fmt.Printf("\nwrote %s profiles to:\n  old=%s\n  new=%s\n",
+		fmt.Printf("\nwrote merged %s profile to:\n  old=%s\n  new=%s\n",
 			profType, bs1.getProfileFile(profType), bs2.getProfileFile(profType))
 	}
 	if cpuProfile {
@@ -615,10 +699,6 @@ func (bs *benchSuite) close() {
 func (bs *benchSuite) getOutputFile(t time.Time) string {
 	return filepath.Join(bs.artDir, "out."+t.Format(timeFormat))
 }
-
-func (bs *benchSuite) getCpuProfileFile() string   { return bs.getProfileFile("cpu") }
-func (bs *benchSuite) getMemProfileFile() string   { return bs.getProfileFile("mem") }
-func (bs *benchSuite) getMutexProfileFile() string { return bs.getProfileFile("mutex") }
 
 func (bs *benchSuite) getProfileFile(profType string) string {
 	return filepath.Join(bs.artDir, profType+".prof")
