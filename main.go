@@ -680,9 +680,13 @@ func (bs *benchSuite) build(pkgFilter []string, postChck string, t time.Time) (e
 	spinner.Start(os.Stderr, fmt.Sprintf("building benchmark binaries for %s: %.50s [bazel=%t] ", bs.ref,
 		bs.subject, bs.useBazel))
 	defer spinner.Stop()
+	buildTestBin := buildTestBinWithGo
+	if bs.useBazel {
+		buildTestBin = buildTestBinWithBazel
+	}
 	for i, pkg := range pkgs {
 		spinner.Update(ui.Fraction(i, len(pkgs)))
-		if testBin, ok, err := buildTestBin(pkg, bs.binDir, bs.useBazel); err != nil {
+		if testBin, ok, err := buildTestBin(pkg, bs.binDir); err != nil {
 			return err
 		} else if ok {
 			bs.testFiles[testBin] = struct{}{}
