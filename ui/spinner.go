@@ -2,7 +2,6 @@ package ui
 
 import (
 	"fmt"
-	"io"
 	"strconv"
 	"sync"
 	"time"
@@ -15,13 +14,13 @@ type Spinner struct {
 	ch chan string
 	wg sync.WaitGroup
 	t  *time.Ticker
-	w  Writer
 }
 
-// Start begins the Spinner, which will write all output to the provided Writer.
-// All log lines delivered to the Writer will be prefixed with the specified
-// prefix.
-func (s *Spinner) Start(out io.Writer, prefix string) {
+// StartSpinner creates the Spinner which will write all output to the provided
+// Writer. All log lines delivered to the Writer will be prefixed with the
+// specified prefix.
+func StartSpinner(w *Writer, prefix string) *Spinner {
+	s := &Spinner{}
 	if s.ch != nil {
 		panic("Spinner started twice")
 	}
@@ -31,11 +30,11 @@ func (s *Spinner) Start(out io.Writer, prefix string) {
 	go func() {
 		defer s.wg.Done()
 		defer s.t.Stop()
-		defer s.w.Flush(out)
 
 		var progress string
 		var ok bool
 		var spinnerIdx int
+		m := w.GetMark()
 		for {
 			select {
 			case <-s.t.C:
@@ -44,17 +43,16 @@ func (s *Spinner) Start(out io.Writer, prefix string) {
 					return
 				}
 			}
-			fmt.Fprint(&s.w, prefix)
+			w.ClearToMark(m)
+			fmt.Fprint(w, prefix)
 			if progress != "" {
-				fmt.Fprint(&s.w, progress)
+				fmt.Fprint(w, progress)
 			}
-			fmt.Fprintf(&s.w, " %s\n", spinnerChars[spinnerIdx%len(spinnerChars)])
-			if err := s.w.Flush(out); err != nil {
-				panic(err)
-			}
+			fmt.Fprintf(w, " %s\n", spinnerChars[spinnerIdx%len(spinnerChars)])
 			spinnerIdx++
 		}
 	}()
+	return s
 }
 
 // Update passes an updated progress status to the spinner.
@@ -68,7 +66,7 @@ func (s *Spinner) Stop() {
 	s.wg.Wait()
 }
 
-// Fraction is a utility funcation that formats a fraction string, given a
+// Fraction is a utility function that formats a fraction string, given a
 // numerator and a denominator.
 func Fraction(n, d int) string {
 	dWidth := strconv.Itoa(len(strconv.Itoa(d)))

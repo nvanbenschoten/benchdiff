@@ -11,40 +11,53 @@
 package ui
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"strings"
 )
 
-// Writer TODO(peter): document
+// Writer is a wrapper around an io.Writer which keeps track of the line count
+// and can be used to issue escape sequences to clear lines.
+//
+// The "mark" of the current position can be saved using GetMark() and later all
+// lines since that mark can be erased using ClearToMark(). Multiple marks can
+// be used; see TestWriter for an example.
 type Writer struct {
-	buf       bytes.Buffer
-	lineCount int
+	wrapped io.Writer
+
+	// lineIdx is the index of the current line (since the writer was created).
+	lineIdx int
 }
 
-// Flush TODO(peter): document
-func (w *Writer) Flush(out io.Writer) error {
-	w.clearLines(out)
-	if len(w.buf.Bytes()) == 0 {
-		return nil
-	}
+func NewWriter(wrapped io.Writer) *Writer {
+	return &Writer{wrapped: wrapped}
+}
 
-	for _, b := range w.buf.Bytes() {
-		if b == '\n' {
-			w.lineCount++
-		}
-	}
-	_, err := out.Write(w.buf.Bytes())
-	w.buf.Reset()
-	return err
+type Mark struct {
+	lineIdx int
 }
 
 func (w *Writer) Write(b []byte) (n int, err error) {
-	return w.buf.Write(b)
+	n, err = w.wrapped.Write(b)
+	for _, c := range b[:n] {
+		if c == '\n' {
+			w.lineIdx++
+		}
+	}
+	return n, err
 }
 
-func (w *Writer) clearLines(out io.Writer) {
-	fmt.Fprint(out, strings.Repeat("\033[1A\033[2K\r", w.lineCount))
-	w.lineCount = 0
+// GetMark returns a Mark representing the current line. Later, ClearToMark()
+// can be used with this mark to erase all lines since this mark.
+func (w *Writer) GetMark() Mark {
+	return Mark{lineIdx: w.lineIdx}
+}
+
+// ClearToMark issues escape sequences to erase all lines since the given mark.
+func (w *Writer) ClearToMark(m Mark) {
+	if w.lineIdx < m.lineIdx {
+		panic("invalid use of mark (marked line was cleared)")
+	}
+	fmt.Fprint(w.wrapped, strings.Repeat("\033[1A\033[2K\r", w.lineIdx-m.lineIdx))
+	w.lineIdx = m.lineIdx
 }
