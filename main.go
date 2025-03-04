@@ -343,43 +343,51 @@ func runCmpBenches(
 	itersPerTest int,
 	preview bool,
 ) error {
-	var spinner ui.Spinner
-	spinner.Start(os.Stderr, "running benchmarks:\n")
-	defer spinner.Stop()
+	w := ui.NewWriter(os.Stderr)
 	for i, t := range tests {
 		pkg := testBinToPkg(t)
+		m := w.GetMark()
 		for j := 0; j < itersPerTest; j++ {
-			pkgFrac := ui.Fraction(i+1, len(tests))
-			iterFrac := ui.Fraction(j+1, itersPerTest)
-			var buf bytes.Buffer
-			if preview && j > 0 {
-				_, err := processBenchOutput(ctx, &buf, bs1, bs2, true, text, tests, nil)
-				if err != nil {
-					return err
+			err := func() error {
+				w.ClearToMark(m)
+				if preview && j > 0 {
+					_, err := processBenchOutput(ctx, w, bs1, bs2, true, text, tests, nil)
+					if err != nil {
+						return err
+					}
+					fmt.Fprintln(w)
 				}
-				_, _ = fmt.Fprintln(&buf)
-			}
-			_, _ = fmt.Fprintf(&buf, "pkg=%s iter=%s %s",
-				pkgFrac, iterFrac,
-				pkg)
-			spinner.Update(buf.String())
 
-			// Interleave test suite runs instead of using -count=itersPerTest. The
-			// idea is that this reduces the chance that we pick up external noise
-			// with a time correlation.
-			for _, b := range []*benchSuite{bs1, bs2} {
-				if j == 0 {
+				pkgFrac := ui.Fraction(i+1, len(tests))
+				iterFrac := ui.Fraction(j+1, itersPerTest)
+
+				spinner := ui.StartSpinner(w, fmt.Sprintf(
+					"running benchmarks:\npkg=%s iter=%s %ss", pkgFrac, iterFrac, pkg,
+				))
+				defer spinner.Stop()
+
+				for _, b := range []*benchSuite{bs1, bs2} {
 					if err := b.unlinkProfiles(); err != nil {
 						return err
 					}
 				}
-				if err := runSingleBench(b, t, runPattern, benchTime, cpuProfile, memProfile, mutexProfile); err != nil {
-					return err
-				}
 
-				if err := b.mergeProfiles(cpuProfile, memProfile, mutexProfile); err != nil {
-					return err
+				// Interleave test suite runs instead of using -count=itersPerTest. The
+				// idea is that this reduces the chance that we pick up external noise
+				// with a time correlation.
+				for _, b := range []*benchSuite{bs1, bs2} {
+					spinner.Update(" " + b.ref)
+					if err := runSingleBench(b, t, runPattern, benchTime, cpuProfile, memProfile, mutexProfile); err != nil {
+						return err
+					}
+					if err := b.mergeProfiles(cpuProfile, memProfile, mutexProfile); err != nil {
+						return err
+					}
 				}
+				return nil
+			}()
+			if err != nil {
+				return err
 			}
 		}
 	}
@@ -679,9 +687,10 @@ func (bs *benchSuite) build(pkgFilter []string, postChck string, t time.Time) (e
 		return err
 	}
 
-	var spinner ui.Spinner
-	spinner.Start(os.Stderr, fmt.Sprintf("building benchmark binaries for %s: %.50s [bazel=%t] ", bs.ref,
-		bs.subject, bs.useBazel))
+	w := ui.NewWriter(os.Stderr)
+	spinner := ui.StartSpinner(w, fmt.Sprintf(
+		"building benchmark binaries for %s: %.50s [bazel=%t] ", bs.ref, bs.subject, bs.useBazel,
+	))
 	defer spinner.Stop()
 	buildTestBin := buildTestBinWithGo
 	if bs.useBazel {
