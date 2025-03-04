@@ -390,6 +390,7 @@ func runCmpBenches(
 				return err
 			}
 		}
+		w.ClearToMark(m)
 	}
 	return nil
 }
