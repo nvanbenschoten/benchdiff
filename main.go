@@ -362,7 +362,7 @@ func runCmpBenches(
 				iterFrac := ui.Fraction(j+1, itersPerTest)
 
 				spinner := ui.StartSpinner(w, fmt.Sprintf(
-					"running benchmarks:\npkg=%s iter=%s %ss", pkgFrac, iterFrac, pkg,
+					"running benchmarks:\npkg=%s iter=%s %s", pkgFrac, iterFrac, pkg,
 				))
 				defer spinner.Stop()
 
