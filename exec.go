@@ -54,6 +54,17 @@ func spawnWith(in io.Reader, out, err io.Writer, args ...string) error {
 	} else {
 		cmd = exec.Command(args[0], args[1:]...)
 	}
+
+	// Ensure that GODEBUG=[...,]runtimecontentionstacks=1 is set to improve
+	// mutex profiles.
+	env := os.Environ()
+	envGodebug := os.Getenv("GODEBUG")
+	if envGodebug != "" {
+		envGodebug += ","
+	}
+	envGodebug += "runtimecontentionstacks=1"
+	cmd.Env = append(env, "GODEBUG="+envGodebug)
+
 	cmd.Stdin = in
 	cmd.Stdout = out
 	cmd.Stderr = err
